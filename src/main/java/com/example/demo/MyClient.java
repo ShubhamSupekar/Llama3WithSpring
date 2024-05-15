@@ -7,14 +7,19 @@ import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-import java.util.ArrayList;
 import java.util.List;
 
 @Component
 public class MyClient {
 
-    public Mono<String> sendRequest(List<Message> customMessages) {
-        String url = "http://localhost:1234/v1/chat/completions";
+    private final WebClient webClient;
+
+    public MyClient(WebClient.Builder webClientBuilder) {
+        this.webClient = webClientBuilder.baseUrl("http://localhost:1234").build();
+    }
+
+    public Flux<String> sendRequest(List<Message> customMessages) {
+        String url = "/v1/chat/completions";
 
         // Create request body object
         ChatRequest request = new ChatRequest();
@@ -24,32 +29,20 @@ public class MyClient {
         request.setStream(true);
         request.setMessages(customMessages);
 
-        WebClient webClient = WebClient.create();
-
-        // Send the request
+        // Send the request and handle the streaming response
         Flux<String> responseFlux = webClient.post()
                 .uri(url)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(BodyInserters.fromValue(request))
                 .retrieve()
-                .bodyToFlux(String.class);
+                .bodyToFlux(String.class)
+                .map(this::extractContent)
+                .filter(content -> content != null && !content.isEmpty())
+                .map(content -> content.replaceAll("\\\\n", "\n"));
 
-        // Collect all responses and concatenate them into a single string
-        Mono<String> responseMono = responseFlux.collectList()
-                .map(responses -> {
-                    StringBuilder stringBuilder = new StringBuilder();
-                    for (String response : responses) {
-                        String content = extractContent(response);
-                        if (content != null) {
-                            content = content.replaceAll("\\\\n", "\n"); // Replace "\n" with actual line breaks
-                            stringBuilder.append(content).append(" "); // Append each response
-                        }
-                    }
-                    return stringBuilder.toString().trim(); // Remove trailing whitespace
-                });
-
-        return responseMono;
+        return responseFlux;
     }
+
     private String extractContent(String response) {
         int startIndex = response.indexOf("\"content\":");
         if (startIndex != -1) { // Check if "content" is found
@@ -63,5 +56,4 @@ public class MyClient {
         }
         return null; // Return null if content is not found or if the indexes are invalid
     }
-
 }
